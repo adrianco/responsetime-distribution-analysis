@@ -2,7 +2,7 @@
 R code to analyze response time distributions as mixed models
 
 As initially described by [this medium post](https://medium.com/@adrianco/percentiles-dont-work-analyzing-the-distribution-of-response-times-for-web-services-ace36a6a2a19)
-Some basic sample data provided
+Some basic sample data provided as a csv. Will also recognize R histogram class as input directly.
 ```
 > sample <- read.csv("sample.csv")
 > as.peaks(sample,plots=T,peakcount=6, normalize = T)
