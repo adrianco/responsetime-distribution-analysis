@@ -1,14 +1,18 @@
-# Take a histogram h$Value h$Count and find the peaks in it, interpolating between bins
+# Written by Adrian Cockcroft (@adrianco@mastodon.social) - 2023 - Apache 2.0 License
+# Thanks to Donnie Berkholz (@dberkholz@hostux.social) and Ed Borasky (@AlgoCompSynth@ravenation.club) for guidance
+#
+# Take a histogram and find the peaks in it, interpolating between bins
 # approximate finite mixed model decomposition starting with histograms of data
 # Intended for use on response time histograms with logarithmic bins like hdrhistogram
 # so that each (approximately) lognormal component is interpreted as a symmetric normal peak
-library(pracma) # for findpeaks
 
-# h - is a data frame containing Values and Counts forming a histogram where Values for each bucket are exponential
+# h - is either a data frame from a csv containing Values and Counts or an R histogram object
+# where the Value/break for each bucket is assumed to be exponential - i.e. hist(log(values))
 # plots - optionally shown
 # normalize - divides down the counts to a probability density
 # peakcount=0 does a quick estimate of all the peaks, otherwise it does up to the specified number of dnorm fits
 # epsilon=0.005 - sets a minimum interesting peak size to 0.5% of the largest peak, the ones that are visible in the plot.
+# the algorithm is quite sensitive to epsilon so try tinkering with it
 # printdebug turns on helpful intermediate print output to see what's going on
 
 # Returns a data frame with one row per peak, sorted biggest peak first
@@ -18,29 +22,41 @@ library(pracma) # for findpeaks
 # PeakMin and PeakMax are the start and end buckets for the peak
 # if a gaussian fit was obtained, then PeakAmplitude is non-zero, along with updated PeakMean and PeakSD
 # The Value of the peak is interpolated to estimate PeakLatency
+
+library(pracma) # for findpeaks
+
 as.peaks <- function(h, plots=FALSE, normalize=FALSE, epsilon=0.005, peakcount=0, printdebug=F) {
+  if (class(h) == "histogram") {
+    # start with an R histogram object
+    hb <- data.frame(Value=exp(h$mids), Count=h$counts) # use the midpounts of the buckets
+  } else {
+    # start with a data frame containing Values and Counts
+    hb <- h
+  }
   # normalize counts to a probability density
   if (normalize) {
     yl <- "Probability Density"
-    h$Count <- h$Count/sum(h$Count)
+    hb$Count <- hb$Count/sum(hb$Count)
   } else {
     yl <- "Count"
   }
   # mean of the entire distribution
-  hmean <- sum(h$Count*h$Value)/sum(h$Count)
+  hmean <- sum(hb$Count*hb$Value)/sum(hb$Count)
   # add bucket as a column for fitting and use this local copy to subtract peaks from Count
-  hb <- cbind(h, Bucket=as.numeric(row.names(h)))
+  hb <- cbind(hb, Bucket=as.numeric(row.names(hb)))
   if (plots) {
-    plot(h$Value, h$Count, type="l",main="Response Time Distribution and Mean",
-         xlab=paste("Mean X=", format(hmean, digits=4), "Seconds"), ylab=yl)
+    plot(hb$Value, hb$Count, type="l",main="Response Time Distribution and Mean",
+         xlab=paste("Mean X=", format(hmean, digits=4), "Latency"), ylab=yl)
     points(hmean, 0, col=2, pch='X') # mark the mean value
-    barplot(h$Count, main="Response Time Histogram with Logarithmic Buckets", ylab=yl)
-    plot(h$Count, type="l", main="Response log(Time) with Peaks", xlab="Bucket Index", ylab=yl)
+    barplot(hb$Count, main="Response Time Histogram with Logarithmic Buckets", ylab=yl)
+    plot(hb$Count, type="l", main="Response log(Time) with Peaks", xlab="Bucket Index", ylab=yl)
   }
   # returns the position of the peaks and the tails on each side, sorted biggest first
-  p <- findpeaks(h$Count, sortstr=T, minpeakheight = epsilon*max(h$Count))
+  # the first bucket may be a peak, so pad with a leading 0 so findpeaks sees it
+  p <- findpeaks(c(0,hb$Count), sortstr=T, minpeakheight = epsilon*max(hb$Count))
   # assemble into data frame with extra columns for gaussian peaks and interpolated peak latency
-  peaks <- data.frame(PeakDensity=p[,1], PeakBucket=p[,2], PeakMin=p[,3], PeakMax=p[,4],
+  # subtract 1 from buckets counts to allow for leading 0
+  peaks <- data.frame(PeakDensity=p[,1], PeakBucket=p[,2]-1, PeakMin=p[,3]-1, PeakMax=p[,4]-1,
              PeakMean=0, PeakSD=0, PeakAmplitude=0, PeakLatency=0)
   # do a quick match of all peaks in one shot if peakcount=0, otherwise subtract out and re-find peaks
   if (peakcount >0)
@@ -52,7 +68,7 @@ as.peaks <- function(h, plots=FALSE, normalize=FALSE, epsilon=0.005, peakcount=0
   for (i in 1:iters) {
     if (i > nrow(peaks)) break # we ran out of peaks before we got to peakcount
     p.bucket <- peaks$PeakBucket[i] # the bucket index at the center of the peak
-    p.min <- max(peaks$PeakMin[i], p.bucket-2) # take at most center five points to fit peak to
+    p.min <- max(peaks$PeakMin[i], p.bucket-2, 1) # take at most center five points to fit peak to
     p.max <- min(peaks$PeakMax[i], p.bucket+2)
     # mean of the peak in between buckets
     peaks$PeakMean[i] <- sum(p.min:p.max * hb$Count[p.min:p.max])/sum(hb$Count[p.min:p.max])
@@ -70,6 +86,12 @@ as.peaks <- function(h, plots=FALSE, normalize=FALSE, epsilon=0.005, peakcount=0
                  control=nls.control(warnOnly=F, printEval=F)), silent=T)
       if (class(fit) == "try-error") {
         if (printdebug) print(fit[1])
+        # crudely clear the current peak to zero
+        hb$Count[min(p.bucket,(p.min+1)):max(p.bucket,(p.max-1))] <- 0
+        if (plots) {
+          lines(hb$Bucket, hb$Count, col=i+1) # the residual that will be fitted next time in the same color
+          points(peaks$PeakMean[i], peaks$PeakDensity[i], col=i, pch="x")
+        }
       } else {
         cfit <- coef(fit)
         if (printdebug) print(cfit)
@@ -94,13 +116,13 @@ as.peaks <- function(h, plots=FALSE, normalize=FALSE, epsilon=0.005, peakcount=0
             newpeaks <- TRUE
             # rescan once for new side peaks revealed by removal
             # that are at least as big as the smallest we've already seen, and at least 5 buckets wide
-            p <- findpeaks(hb$Count, minpeakheight=min(peaks$PeakDensity), sortstr=T) # ndowns = 2, nups = 2)
+            p <- findpeaks(hb$Count, minpeakheight=min(peaks$PeakDensity), sortstr=T, ndowns = 2, nups = 2)
             if (printdebug) {
               print(p)
             }
             if (!is.null(p) && nrow(p) > 0) {
-              # CHANGE TO MERGE - need to remove any peaks that are at same buckets as previous run
-              # append new peaks to end
+              # CHANGE TO MERGE? - may need to remove any peaks that are at same buckets as previous run
+              # append new peaks to end, don't care about peak in the first bucket this time
               peaks[(i+1):(i+nrow(p)),] <- cbind(p, array(0,c(nrow(p),4))) # pad p to fit the data frame
             } else {
               break # stop trying to process any more peaks
@@ -110,12 +132,12 @@ as.peaks <- function(h, plots=FALSE, normalize=FALSE, epsilon=0.005, peakcount=0
       }
     }
     # interpolate between the values of the buckets each side of the peak to get the latency
-    p.logbucketvalue <- log(h$Value[p.bucket]) # the time value at that bucket
+    p.logbucketvalue <- log(hb$Value[p.bucket]) # the time value at that bucket
     peaks$PeakLatency[i] <- exp((log(hb$Value[p.bucket+1]) - p.logbucketvalue) *   
                                   (peaks$PeakMean[i] - p.bucket) + p.logbucketvalue)
   }
   # final sorted return value
   if (plots && peakcount == 0) points(peaks$PeakMean, peaks$PeakDensity, col=1, pch="x")
   if (iters < nrow(peaks)) peaks <- peaks[1:iters,] # trim any un-used peaks
-  peaks[order(peaks$PeakDensity, decreasing=T),]
+  peaks[order(peaks$PeakLatency, decreasing=F),]
 }
