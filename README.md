@@ -13,3 +13,7 @@ Some basic sample data provided
 2 0.173191489         25      20      26 24.483727 0.7152434    0.00000000  2432.67183
 1 0.222553191         28      26      31 27.322500 1.0325453    0.64311539  4291.96511
 ```
+
+![response](sample-response.png)
+![barplot](sample-barplot.png)
+![peaks](sample-peaks.png)
