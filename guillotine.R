@@ -1,6 +1,6 @@
 # guillotine.R - chop logfile response time data into sections and process into peaks
 # Written by Adrian Cockcroft (@adrianco@mastodon.social) - 2023 - Apache 2.0 License
-#
+
 # ChatGPT query resulting in the initial version of the code below
 # I now have a list of peaks dataframes,  each contains about ten density/latency pairs of data.
 # What I want is an iterative clustering algorithm for a stream of data frames over time.
@@ -11,12 +11,12 @@
 # The current cluster state is returned.
 # There is a separate function that adds a new data frame to be clustered. 
 
-addPeaks <- function(peaks, clusters, normalize, threshold=0.05) {
+addPeaks <- function(peaks, clusters, latencyScale, threshold=0.05) {
   for (i in 1:nrow(peaks)) {
     point <- peaks[i, c(8, 1)]  # Extract the (x, y) coordinates Latency and Density
     if (point[1] <= 0) next # sometimes latency rounds down to zero, skip to avoid log(0)
     
-    point[1] <- log(point[1])/normalize # normalize log latency to consistent max bucket
+    point[1] <- log(point[1])/latencyScale # normalize log latency to consistent max bucket
     
     # Calculate distances to existing clusters
     distances <- sapply(clusters, function(cluster) sqrt((point[1] - cluster$centroid[1])^2 + (point[2] - cluster$centroid[2])^2))
@@ -30,7 +30,7 @@ addPeaks <- function(peaks, clusters, normalize, threshold=0.05) {
       closest_cluster$centroid <- colMeans(closest_cluster$points)
       clusters[[closest_cluster_index]] <- closest_cluster
     } else {
-      new_cluster <- list(peaks = peaks[i, ], points = point, centroid = colMeans(point), normalize=normalize) # has to match the clusters, not a df
+      new_cluster <- list(peaks = peaks[i, ], points = point, centroid = colMeans(point), latencyScale=latencyScale) # has to match the clusters, not a df
       clusters <- c(clusters, list(new_cluster))
     }
   }
@@ -77,7 +77,7 @@ guillotine <- function(df, plot=F, epsilon=0.01, peakcount=10) {
   first_points[,1] <- log(first_points[,1])/mhb   # normalize log latency to max bucket
   
   initial_clusters <- lapply(1:nrow(first_points), function(i) {
-    list(peaks = first_data_frame[i, ], points = first_points[i, ], centroid = as.matrix(first_points[i, ]), normalize = mhb)
+    list(peaks = first_data_frame[i, ], points = first_points[i, ], centroid = as.matrix(first_points[i, ]), latencyScale = mhb)
   })
   
   # Process subsequent data frames
@@ -149,11 +149,14 @@ plotClusterPercentile <- function(clusters) {
     cluster <- clusters[[i]]
     
     # Calculate the combined standard deviation using the geometric mean
-    combined_sd <- exp(mean(log(cluster$peaks$PeakSD)))
+    psd <- cluster$peaks$PeakSD # eliminate any zero SD values first
+    psd <- psd[psd > 0]
+    if (length(psd) == 0) break
+    combined_sd <- exp(mean(log(psd)))
     
     # Calculate the combined distribution using dnorm
-    latency <- seq(0, cluster$normalize, length.out = 1000)  # Adjust the range and resolution as needed
-    density_combined <- dnorm(latency, mean = cluster$centroid[1] * cluster$normalize, sd = combined_sd)
+    latency <- seq(0, 40, length.out = 100)  # Adjust the range and resolution as needed
+    density_combined <- cluster$centroid[2] * dnorm(latency, mean = cluster$centroid[1] * 40, sd = combined_sd)
     
     # Add the combined distribution to the data frame
     combined_dist <- rbind(combined_dist, data.frame(latency = latency, density = density_combined, cluster = i))
