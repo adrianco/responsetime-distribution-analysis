@@ -8,6 +8,7 @@
 
 # h - is either a data frame from a csv containing Values and Counts or an R histogram object
 # where the Value/break for each bucket is assumed to be exponential - i.e. hist(log(values))
+# time is an optional timestamp that is added as a column for this set of peaks
 # plots - optionally shown
 # normalize - divides down the counts to a probability density
 # peakcount=0 does a quick estimate of all the peaks, otherwise it does up to the specified number of dnorm fits
@@ -25,7 +26,7 @@
 
 library(pracma) # for findpeaks
 
-as.peaks <- function(h, plots=FALSE, normalize=FALSE, epsilon=0.005, peakcount=0, printdebug=F) {
+as.peaks <- function(h, time=0, plots=FALSE, normalize=FALSE, epsilon=0.005, peakcount=0, printdebug=F) {
   if (class(h) == "histogram") {
     # start with an R histogram object
     hb <- data.frame(Value=exp(h$mids), Count=h$counts) # use the midpounts of the buckets
@@ -57,7 +58,7 @@ as.peaks <- function(h, plots=FALSE, normalize=FALSE, epsilon=0.005, peakcount=0
   # assemble into data frame with extra columns for gaussian peaks and interpolated peak latency
   # subtract 1 from buckets counts to allow for leading 0
   peaks <- data.frame(PeakDensity=p[,1], PeakBucket=p[,2]-1, PeakMin=p[,3]-1, PeakMax=p[,4]-1,
-             PeakMean=0, PeakSD=0, PeakAmplitude=0, PeakLatency=0)
+             PeakMean=0, PeakSD=0, PeakAmplitude=0, PeakLatency=0, Time=0)
   # do a quick match of all peaks in one shot if peakcount=0, otherwise subtract out and re-find peaks
   if (peakcount >0)
     iters <- peakcount
@@ -116,14 +117,15 @@ as.peaks <- function(h, plots=FALSE, normalize=FALSE, epsilon=0.005, peakcount=0
             newpeaks <- TRUE
             # rescan once for new side peaks revealed by removal
             # that are at least as big as the smallest we've already seen, and at least 5 buckets wide
-            p <- findpeaks(hb$Count, minpeakheight=min(peaks$PeakDensity), sortstr=T, ndowns = 2, nups = 2)
+            p <- findpeaks(hb$Count, minpeakheight=min(peaks$PeakDensity), sortstr=T, ndowns = 1, nups = 1)
             if (printdebug) {
+              print("Rescanning for revealed peaks")
               print(p)
             }
             if (!is.null(p) && nrow(p) > 0) {
               # CHANGE TO MERGE? - may need to remove any peaks that are at same buckets as previous run
               # append new peaks to end, don't care about peak in the first bucket this time
-              peaks[(i+1):(i+nrow(p)),] <- cbind(p, array(0,c(nrow(p),4))) # pad p to fit the data frame
+              peaks[(i+1):(i+nrow(p)),] <- cbind(p, array(0,c(nrow(p),5))) # pad p to fit the data frame
             } else {
               break # stop trying to process any more peaks
             }
@@ -139,5 +141,6 @@ as.peaks <- function(h, plots=FALSE, normalize=FALSE, epsilon=0.005, peakcount=0
   # final sorted return value
   if (plots && peakcount == 0) points(peaks$PeakMean, peaks$PeakDensity, col=1, pch="x")
   if (iters < nrow(peaks)) peaks <- peaks[1:iters,] # trim any un-used peaks
+  peaks$Time = as.POSIXct(time)
   peaks[order(peaks$PeakLatency, decreasing=F),]
 }
