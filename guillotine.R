@@ -1,5 +1,6 @@
 # guillotine.R - chop logfile response time data into sections and process into peaks
-
+# Written by Adrian Cockcroft (@adrianco@mastodon.social) - 2023 - Apache 2.0 License
+#
 # ChatGPT query resulting in the initial version of the code below
 # I now have a list of peaks dataframes,  each contains about ten density/latency pairs of data.
 # What I want is an iterative clustering algorithm for a stream of data frames over time.
