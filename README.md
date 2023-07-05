@@ -1,7 +1,9 @@
 # Responsetime Distribution Analysis
 R code to analyze response time distributions as mixed models, and to cluster seqences of peaks over time as discussed in my Monitorama 2023 talk.
 
-As initially described by [this medium post](https://medium.com/@adrianco/percentiles-dont-work-analyzing-the-distribution-of-response-times-for-web-services-ace36a6a2a19)
+As initially described by [this medium post](https://medium.com/@adrianco/percentiles-dont-work-analyzing-the-distribution-of-response-times-for-web-services-ace36a6a2a19) and extended for Monitorama June 2023 [slides here](https://github.com/adrianco/slides/blob/master/Monitorama%20Histograms.pdf)
+
+
 Some basic sample data provided as a csv. Will also recognize R histogram class as input directly.
 ```
 > sample <- read.csv("sample.csv")
